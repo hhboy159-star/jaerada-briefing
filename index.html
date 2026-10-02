@@ -928,10 +928,10 @@ function Sidebar({ view, setView, role, account, onLogout, onOpenChangePassword,
   const nav = [
     { key: "dashboard", label: "대시보드", icon: LayoutDashboard },
     { key: "children", label: "아이 관리", icon: Users },
-    ...(role === "admin" ? [{ key: "teachers", label: "교사 관리", icon: UserCog }] : []),
-    ...(role === "admin" ? [{ key: "withdrawn", label: "퇴원 관리", icon: UserX }] : []),
-    ...(role === "admin" ? [{ key: "references", label: "참고자료 관리", icon: BookOpen }] : []),
-    ...(account?.isSuperAdmin ? [{ key: "accounts", label: "계정 관리", icon: ShieldCheck }] : []),
+    { key: "teachers", label: "교사 관리", icon: UserCog },
+    { key: "withdrawn", label: "퇴원 관리", icon: UserX },
+    { key: "references", label: "참고자료 관리", icon: BookOpen },
+    ...(role === "admin" ? [{ key: "accounts", label: "계정 관리", icon: ShieldCheck }] : []),
   ];
   const scheduleActive = view === "schedule";
   // 사이드바 표시 여부/위치는 Tailwind의 md: 같은 CSS 미디어쿼리 브레이크포인트에 기대지 않고
@@ -1089,7 +1089,7 @@ function Dashboard({ children, briefings, deepBriefings, schedule, attendance, d
   const [tableFilter, setTableFilter] = useState(null);
   const tableRef = useRef(null);
 
-  const scopeTeacher = role === "teacher" ? teacherName : selectedTeacher;
+  const scopeTeacher = selectedTeacher;
   const today = todayISO();
   const isToday = cursorDate === today;
   const cursorDay = dayFromDate(cursorDate);
@@ -1245,12 +1245,10 @@ function Dashboard({ children, briefings, deepBriefings, schedule, attendance, d
               <button key={k} onClick={() => setViewMode(k)} className={`px-3 py-1.5 rounded-md font-medium ${viewMode === k ? "bg-blue-900 text-white" : "text-slate-500 hover:bg-slate-50"}`}>{l}</button>
             ))}
           </div>
-          {role === "admin" && (
-            <select value={selectedTeacher} onChange={e => setSelectedTeacher(e.target.value)} className="border border-slate-200 rounded-lg px-3 py-1.5 text-xs bg-white">
-              <option value="전체">전체 교사</option>
-              {teacherList.map(t => <option key={t} value={t}>{t} 선생님</option>)}
-            </select>
-          )}
+          <select value={selectedTeacher} onChange={e => setSelectedTeacher(e.target.value)} className="border border-slate-200 rounded-lg px-3 py-1.5 text-xs bg-white">
+            <option value="전체">전체 교사</option>
+            {teacherList.map(t => <option key={t} value={t}>{t} 선생님</option>)}
+          </select>
         </div>
       </div>
 
@@ -1279,11 +1277,9 @@ function Dashboard({ children, briefings, deepBriefings, schedule, attendance, d
             <div className="lg:col-span-7 space-y-3">
               <div className="flex items-center justify-between">
                 <h2 className="font-semibold text-slate-800 text-sm">오늘 수업 시간표</h2>
-                {role === "admin" && (
-                  <label className="flex items-center gap-1.5 text-[11px] text-slate-400">
-                    <input type="checkbox" checked={showEmptySlots} onChange={e => setShowEmptySlots(e.target.checked)} /> 빈 교시 포함
-                  </label>
-                )}
+                <label className="flex items-center gap-1.5 text-[11px] text-slate-400">
+                  <input type="checkbox" checked={showEmptySlots} onChange={e => setShowEmptySlots(e.target.checked)} /> 빈 교시 포함
+                </label>
               </div>
               {slotInfos.length === 0 && <div className="bg-white rounded-xl border border-slate-200 border-dashed p-8 text-center text-sm text-slate-400">해당 조건의 교시가 없습니다.</div>}
               {slotInfos.map(({ slot, kids, total, done, missing }) => {
@@ -1699,7 +1695,7 @@ function ChildrenList({ children, schedule, teachers, briefings, deepBriefings, 
   const [showForm, setShowForm] = useState(false);
 
   const activeChildren = children.filter(c => c.status !== "withdrawn");
-  const visibleChildren = role === "teacher" ? activeChildren.filter(c => c.teacher === teacherName) : activeChildren;
+  const visibleChildren = activeChildren;
   const teacherFilterOptions = ["전체", ...Array.from(new Set(activeChildren.map(c => c.teacher)))];
   const classes = ["전체", ...Array.from(new Set(activeChildren.map(c => c.className)))];
   const filtered = visibleChildren.filter(c => c.name.includes(search) && (teacherFilter === "전체" || c.teacher === teacherFilter) && (classFilter === "전체" || c.className === classFilter));
@@ -1709,16 +1705,12 @@ function ChildrenList({ children, schedule, teachers, briefings, deepBriefings, 
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-slate-800">아이 관리</h1>
         <div className="flex items-center gap-2">
-          {role === "admin" && (
-            <button onClick={() => setView("withdrawn")} className="flex items-center gap-1.5 text-slate-500 text-sm px-3 py-2 rounded-lg border border-slate-200 hover:bg-slate-50">
-              <UserX className="w-4 h-4" /> 퇴원 명단
-            </button>
-          )}
-          {role === "admin" && (
-            <button onClick={() => setShowForm(true)} className="flex items-center gap-1.5 bg-amber-400 text-blue-900 font-semibold text-sm px-4 py-2 rounded-lg hover:bg-amber-300">
-              <Plus className="w-4 h-4" /> 아이 등록
-            </button>
-          )}
+          <button onClick={() => setView("withdrawn")} className="flex items-center gap-1.5 text-slate-500 text-sm px-3 py-2 rounded-lg border border-slate-200 hover:bg-slate-50">
+            <UserX className="w-4 h-4" /> 퇴원 명단
+          </button>
+          <button onClick={() => setShowForm(true)} className="flex items-center gap-1.5 bg-amber-400 text-blue-900 font-semibold text-sm px-4 py-2 rounded-lg hover:bg-amber-300">
+            <Plus className="w-4 h-4" /> 아이 등록
+          </button>
         </div>
       </div>
       <div className="flex flex-wrap gap-3">
@@ -1726,7 +1718,7 @@ function ChildrenList({ children, schedule, teachers, briefings, deepBriefings, 
           <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder="아이 이름 검색" className="w-full pl-9 pr-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-900/20" />
         </div>
-        {role === "admin" && <select value={teacherFilter} onChange={e => setTeacherFilter(e.target.value)} className="border border-slate-200 rounded-lg px-3 py-2 text-sm">{teacherFilterOptions.map(t => <option key={t}>{t}</option>)}</select>}
+        <select value={teacherFilter} onChange={e => setTeacherFilter(e.target.value)} className="border border-slate-200 rounded-lg px-3 py-2 text-sm">{teacherFilterOptions.map(t => <option key={t}>{t}</option>)}</select>
         <select value={classFilter} onChange={e => setClassFilter(e.target.value)} className="border border-slate-200 rounded-lg px-3 py-2 text-sm">{classes.map(c => <option key={c}>{c}</option>)}</select>
       </div>
       <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -2120,18 +2112,16 @@ function ChildDetail({ child, schedule, teachers, briefings, deepBriefings, role
               <div className="text-xs text-slate-400 mt-0.5">{child.age}세 · {child.grade} · 담당 {child.teacher} 선생님 · {child.className}</div>
             </div>
           </div>
-          {role === "admin" && (
-            <div className="flex gap-2">
-              {isWithdrawn ? (
-                <button onClick={() => onReinstateChild(child.id)} className="text-xs font-medium text-blue-900 border border-blue-200 rounded-lg px-3 py-1.5 hover:bg-blue-50">복귀 처리</button>
-              ) : (
-                <>
-                  <button onClick={() => setEditingInfo(true)} className="p-2 rounded-lg hover:bg-slate-50 text-slate-400"><Edit2 className="w-4 h-4" /></button>
-                  <button onClick={() => { if (confirm(`${child.name} 학생을 퇴원 처리할까요? 기존 기록은 보존되며 수업 명단에서만 제외됩니다.`)) onWithdrawChild(child.id); }} className="p-2 rounded-lg hover:bg-red-50 text-red-400" title="퇴원 처리"><UserX className="w-4 h-4" /></button>
-                </>
-              )}
-            </div>
-          )}
+          <div className="flex gap-2">
+            {isWithdrawn ? (
+              <button onClick={() => onReinstateChild(child.id)} className="text-xs font-medium text-blue-900 border border-blue-200 rounded-lg px-3 py-1.5 hover:bg-blue-50">복귀 처리</button>
+            ) : (
+              <>
+                <button onClick={() => setEditingInfo(true)} className="p-2 rounded-lg hover:bg-slate-50 text-slate-400"><Edit2 className="w-4 h-4" /></button>
+                <button onClick={() => { if (confirm(`${child.name} 학생을 퇴원 처리할까요? 기존 기록은 보존되며 수업 명단에서만 제외됩니다.`)) onWithdrawChild(child.id); }} className="p-2 rounded-lg hover:bg-red-50 text-red-400" title="퇴원 처리"><UserX className="w-4 h-4" /></button>
+              </>
+            )}
+          </div>
         </div>
         <div className="grid sm:grid-cols-2 gap-3 mt-4 pt-4 border-t border-slate-100">
           <div><div className="text-xs font-medium text-slate-500 mb-1">학부모의 주요 교육 니즈</div><p className="text-sm text-slate-700">{child.parentNeeds || "—"}</p></div>
@@ -2257,9 +2247,7 @@ function DeepBriefingList({ deepBriefings, children, teachers, role, teacherName
   const childById = Object.fromEntries(children.map(c => [c.id, c]));
   const classNames = Array.from(new Set(teachers.map(t => t.className).filter(Boolean))).sort((a, b) => (parseInt(a) || 0) - (parseInt(b) || 0));
 
-  const visibleScope = role === "teacher"
-    ? deepBriefings.filter(d => childById[d.childId]?.teacher === teacherName)
-    : deepBriefings;
+  const visibleScope = deepBriefings;
 
   const rows = visibleScope
     .map(d => ({ deep: d, child: childById[d.childId] }))
@@ -2286,12 +2274,10 @@ function DeepBriefingList({ deepBriefings, children, teachers, role, teacherName
           <Search className="w-3.5 h-3.5 text-slate-300 absolute left-2.5 top-1/2 -translate-y-1/2" />
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder="학생 이름으로 검색" className="w-full border border-slate-200 rounded-lg pl-8 pr-3 py-2 text-sm" />
         </div>
-        {role === "admin" && (
-          <select value={classFilter} onChange={e => setClassFilter(e.target.value)} className="border border-slate-200 rounded-lg px-2.5 py-2 text-sm">
-            <option value="all">전체 반</option>
-            {classNames.map(cn => <option key={cn} value={cn}>{cn}</option>)}
-          </select>
-        )}
+        <select value={classFilter} onChange={e => setClassFilter(e.target.value)} className="border border-slate-200 rounded-lg px-2.5 py-2 text-sm">
+          <option value="all">전체 반</option>
+          {classNames.map(cn => <option key={cn} value={cn}>{cn}</option>)}
+        </select>
         <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="border border-slate-200 rounded-lg px-2.5 py-2 text-sm">
           <option value="all">전체 상태</option>
           <option value="draft">초안</option>
@@ -2465,10 +2451,10 @@ function DeepBriefingReview({ deep, child, allDeepForChild, references, sourceBr
         <div className="flex flex-wrap gap-2 print:hidden">
           <button onClick={regenerateAll} disabled={regenAll} className="flex items-center gap-1.5 bg-white border border-slate-200 text-slate-600 text-sm font-medium px-4 py-2 rounded-lg hover:bg-slate-50">{regenAll ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />} 전체 다시 생성</button>
           <button onClick={saveDraft} className="flex items-center gap-1.5 bg-white border border-slate-200 text-slate-600 text-sm font-medium px-4 py-2 rounded-lg hover:bg-slate-50"><Save className="w-4 h-4" /> 초안 저장</button>
-          {role === "admin" && deep.status !== "reviewing" && (
+          {deep.status !== "reviewing" && (
             <button onClick={() => onUpdate({ ...deep, sections: local, status: "reviewing", updatedAt: new Date().toISOString() })} className="flex items-center gap-1.5 bg-white border border-slate-200 text-slate-600 text-sm font-medium px-4 py-2 rounded-lg hover:bg-slate-50"><ListChecks className="w-4 h-4" /> 관리자 검토로 전환</button>
           )}
-          {role === "admin" && <button onClick={finalize} className="flex items-center gap-1.5 bg-blue-900 text-white text-sm font-medium px-4 py-2 rounded-lg hover:bg-blue-800"><ShieldCheck className="w-4 h-4" /> 최종 확정</button>}
+          <button onClick={finalize} className="flex items-center gap-1.5 bg-blue-900 text-white text-sm font-medium px-4 py-2 rounded-lg hover:bg-blue-800"><ShieldCheck className="w-4 h-4" /> 최종 확정</button>
         </div>
       )}
       <div className="flex flex-wrap gap-2 print:hidden">
@@ -2745,7 +2731,7 @@ function ScheduleTree({ schedule, children, teachers = [], classFilter, briefing
   const toggleDay = (d) => setExpandedDays(prev => { const n = new Set(prev); n.has(d) ? n.delete(d) : n.add(d); return n; });
   const toggleSlot = (id) => setExpandedSlots(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
 
-  let visibleSchedule = role === "teacher" ? schedule.filter(s => s.teacher === teacherName) : schedule;
+  let visibleSchedule = schedule;
   if (classFilter) visibleSchedule = visibleSchedule.filter(s => classNameByTeacher[s.teacher] === classFilter);
 
   return (
@@ -2799,11 +2785,9 @@ function ScheduleTree({ schedule, children, teachers = [], classFilter, briefing
           </div>
         );
       })}
-      {role === "admin" && (
-        <button onClick={onManage} className="w-full mt-2 flex items-center justify-center gap-1.5 text-sm text-blue-900 font-medium border border-dashed border-blue-200 rounded-lg py-2.5 hover:bg-blue-50">
-          <Edit2 className="w-3.5 h-3.5" /> 요일 · 교시 관리
-        </button>
-      )}
+      <button onClick={onManage} className="w-full mt-2 flex items-center justify-center gap-1.5 text-sm text-blue-900 font-medium border border-dashed border-blue-200 rounded-lg py-2.5 hover:bg-blue-50">
+        <Edit2 className="w-3.5 h-3.5" /> 요일 · 교시 관리
+      </button>
     </div>
   );
 }
@@ -3932,10 +3916,10 @@ function App() {
           {view === "children" && (
             <ChildrenList children={children} schedule={schedule} teachers={teachers} briefings={briefings} deepBriefings={deepBriefings} role={role} teacherName={teacherName} setView={setView} setSelectedChildId={setSelectedChildId} onAddChild={addChild} />
           )}
-          {view === "teachers" && role === "admin" && (
+          {view === "teachers" && (
             <TeacherManager teachers={teachers} children={children} schedule={schedule} onAdd={addTeacher} onEdit={editTeacher} onDelete={deleteTeacher} />
           )}
-          {view === "withdrawn" && role === "admin" && (
+          {view === "withdrawn" && (
             <WithdrawnList children={children} briefings={briefings} setView={setView} setSelectedChildId={setSelectedChildId} onReinstate={reinstateChild} onHardDelete={hardDeleteChild} />
           )}
           {view === "childDetail" && selectedChild && (
@@ -3968,8 +3952,8 @@ function App() {
               onAdd={addMonthlyStar} onEdit={editMonthlyStar} onDelete={deleteMonthlyStar} notify={notify}
             />
           )}
-          {view === "references" && role === "admin" && <ReferencesPage references={references} onAdd={addReference} onDelete={deleteReference} />}
-          {view === "accounts" && session.isSuperAdmin && (
+          {view === "references" && <ReferencesPage references={references} onAdd={addReference} onDelete={deleteReference} />}
+          {view === "accounts" && role === "admin" && (
             <AccountManager accounts={accounts} teachers={teachers} onCreate={addAccount} onUpdate={editAccount} onResetPassword={resetAccountPassword} />
           )}
           </div>
