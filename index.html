@@ -850,14 +850,16 @@ async function regenerateBriefingSection(child, batch, sectionKey, currentSectio
 
 // 핵심 요약: 수업 기록 + 집중브리핑을 종합해 1~2줄로 요약 (보강 교사가 빠르게 파악할 수 있도록)
 function buildQuickSummaryPrompt(child, past, deepBriefings) {
-  const topics = (past || []).slice(0, 8).map(b => `- ${b.date} ${b.topic}: ${(b.teacherSummary || "").slice(0, 80)}`).join("\n");
+  const topics = (past || []).slice(0, 8).map(b => `- ${b.date} ${b.topic}: ${(b.teacherSummary || "").slice(0, 120)}`).join("\n");
   const latestDeep = (deepBriefings || []).slice().sort((a, b) => new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0))[0];
   const deepText = latestDeep
-    ? SECTION_DEFS.map(s => `[${s.label}] ${(latestDeep.sections?.[s.key] || "").slice(0, 200)}`).join("\n")
+    ? SECTION_DEFS.map(s => `[${s.label}] ${(latestDeep.sections?.[s.key] || "").slice(0, 250)}`).join("\n")
     : "(아직 작성된 집중브리핑 없음)";
+  const n = childGivenName(child.name);
   return [
-    `아이 이름: ${child.name} (${child.age}세)`,
-    `\n최근 수업 기록:`,
+    `아이 이름(이름만 사용, 성 빼고): ${n} · 나이: ${child.age}세`,
+    `이름에 조사를 붙일 때 참고: '${withTopicParticle(n)}', '${withSubjectParticle(n)}', '${withObjectParticle(n)}'`,
+    `\n최근 수업 기록 (날짜 · 주제 · 교사 메모):`,
     topics || "(수업 기록 없음)",
     `\n가장 최근 집중브리핑 내용:`,
     deepText,
@@ -866,10 +868,15 @@ function buildQuickSummaryPrompt(child, past, deepBriefings) {
 
 function buildQuickSummarySystem() {
   return [
-    "너는 미술학원의 보강(대체) 교사가 아이를 처음 맡아 수업하기 직전, 몇 초 안에 읽고 파악할 수 있도록 핵심만 정리하는 보조자다.",
-    "주어진 수업 기록과 집중브리핑 내용을 바탕으로, 이 아이의 성향·주의할 점·현재 흐름 중 보강 수업에 가장 도움이 되는 내용만 골라 정리한다.",
-    "출력은 반드시 한국어 1~2문장, 총 90자 이내로 작성한다. 설명 없이 핵심 문장만 출력한다.",
-    "추측이나 진단적 표현, 과장된 칭찬은 쓰지 않는다. 실제 기록에 있는 내용만 근거로 삼는다.",
+    "너는 미술학원의 보강(대체) 교사가 이 아이를 처음 맡아 수업하기 직전, 몇 초 안에 읽고 '그래서 오늘 이 아이를 어떻게 대하면 되는지' 바로 알 수 있도록 정리하는 보조자다.",
+    "반드시 두 문장으로 쓴다. 1번째 문장은 보강 교사가 알아야 할 이 아이만의 구체적 특징이나 최근 상황(사실), 2번째 문장은 그래서 오늘 수업에서 교사가 실제로 어떻게 하면 좋은지 행동 지침(할 것/주의할 것)이다. 2번째 문장 없이 설명만으로 끝내지 않는다.",
+    "'어떤 아이에게나 붙일 수 있는 문장'은 쓰지 않는다. 금지 표현 예시: '적극적으로 표현', '포기하지 않는 태도', '다양한 재료를 활용', '문제 해결 능력을 키우고 있다', '긍정적인 수업 흐름이 기대된다', '잘 적응하고 있다' 같은 막연한 칭찬·전망.",
+    "1번째 문장은 주어진 수업 기록과 집중브리핑에 실제로 적힌 구체적인 내용(예: 특정 상황에서 보이는 반응, 좋아하거나 불편해하는 재료·활동, 최근 수업에서 실제로 있었던 장면)만 근거로 쓴다.",
+    "2번째 문장은 추상적 조언('잘 지도해주세요' 등)이 아니라, 1번째 문장의 사실에서 바로 이어지는 구체적 행동으로 쓴다. 예: '불안해하면 먼저 재료를 직접 골라보게 해주세요.', '산만해지면 짧은 과제부터 나눠서 제시해주세요.', '색 섞는 활동을 좋아하니 오늘도 선택지를 주면 좋습니다.'",
+    "자료에 구체적인 내용이 거의 없으면 억지로 지어내지 말고 '아직 특별히 기록된 특이사항은 없어 평소대로 진행하면 됩니다.' 정도로 짧게 적는다.",
+    "아이를 부를 때는 성을 뺀 이름만 사용하고, 받침이 있는 이름에는 반드시 '이'를 붙인 뒤 조사를 쓴다 (예시로 준 조사 형태를 그대로 따른다). '학생'을 붙이지 않는다.",
+    "출력은 반드시 한국어 두 문장, 총 120자 이내로 작성한다. 설명 없이 완성된 두 문장만 출력한다.",
+    "추측이나 진단적 표현은 쓰지 않는다. 실제 기록에 있는 내용만 근거로 삼는다.",
     "따옴표, 번호, 불릿 없이 자연스러운 문장으로만 출력한다.",
   ].join("\n");
 }
@@ -882,9 +889,9 @@ async function generateQuickSummary(child, past, deepBriefings) {
 function mockQuickSummary(child, past, deepBriefings) {
   const n = childGivenName(child.name);
   const nTopic = withTopicParticle(n);
-  if (!(past || []).length && !(deepBriefings || []).length) return `${nTopic} 아직 누적된 수업 기록이 없습니다.`;
+  if (!(past || []).length && !(deepBriefings || []).length) return `${nTopic} 아직 누적된 수업 기록이 없어 평소대로 진행하면 됩니다. (테스트 모드 요약)`;
   const lastTopic = past && past[0] && past[0].topic;
-  return `${nTopic} 최근 ${lastTopic ? `'${lastTopic}' 등의 수업에서` : "여러 수업에서"} 꾸준한 참여를 보이고 있습니다. (테스트 모드 요약)`;
+  return `${nTopic} 최근 ${lastTopic ? `'${lastTopic}' 수업에서` : "최근 수업에서"} 꾸준히 참여하는 모습을 보였습니다. 평소처럼 선택지를 주며 진행하면 됩니다. (테스트 모드 요약)`;
 }
 
 function mockGenerate(child, batch) {
