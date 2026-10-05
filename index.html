@@ -3609,7 +3609,7 @@ function ScheduleView({ schedule, children, teachers, classFilter, briefings, at
         <div style={{ minWidth: 0 }} className={isMobile && !mobileShowForm ? "hidden" : "block"}>
           {selected ? (
             <DailyBriefingPanel
-              child={selected.child} slot={selected.slot} date={date} setDate={setDate}
+              child={children.find(c => c.id === selected.child.id) || selected.child} slot={selected.slot} date={date} setDate={setDate}
               briefings={briefings} references={references} deepBriefings={deepBriefings} testMode={testMode}
               allBriefingsForChild={briefings.filter(b => b.childId === selected.child.id)}
               onSubmit={onSubmitBriefing}
