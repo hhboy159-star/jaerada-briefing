@@ -848,6 +848,45 @@ async function regenerateBriefingSection(child, batch, sectionKey, currentSectio
   return stripMetaPhrases(text.replace(/```/g, "").trim());
 }
 
+// 핵심 요약: 수업 기록 + 집중브리핑을 종합해 1~2줄로 요약 (보강 교사가 빠르게 파악할 수 있도록)
+function buildQuickSummaryPrompt(child, past, deepBriefings) {
+  const topics = (past || []).slice(0, 8).map(b => `- ${b.date} ${b.topic}: ${(b.teacherSummary || "").slice(0, 80)}`).join("\n");
+  const latestDeep = (deepBriefings || []).slice().sort((a, b) => new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0))[0];
+  const deepText = latestDeep
+    ? SECTION_DEFS.map(s => `[${s.label}] ${(latestDeep.sections?.[s.key] || "").slice(0, 200)}`).join("\n")
+    : "(아직 작성된 집중브리핑 없음)";
+  return [
+    `아이 이름: ${child.name} (${child.age}세)`,
+    `\n최근 수업 기록:`,
+    topics || "(수업 기록 없음)",
+    `\n가장 최근 집중브리핑 내용:`,
+    deepText,
+  ].join("\n");
+}
+
+function buildQuickSummarySystem() {
+  return [
+    "너는 미술학원의 보강(대체) 교사가 아이를 처음 맡아 수업하기 직전, 몇 초 안에 읽고 파악할 수 있도록 핵심만 정리하는 보조자다.",
+    "주어진 수업 기록과 집중브리핑 내용을 바탕으로, 이 아이의 성향·주의할 점·현재 흐름 중 보강 수업에 가장 도움이 되는 내용만 골라 정리한다.",
+    "출력은 반드시 한국어 1~2문장, 총 90자 이내로 작성한다. 설명 없이 핵심 문장만 출력한다.",
+    "추측이나 진단적 표현, 과장된 칭찬은 쓰지 않는다. 실제 기록에 있는 내용만 근거로 삼는다.",
+    "따옴표, 번호, 불릿 없이 자연스러운 문장으로만 출력한다.",
+  ].join("\n");
+}
+
+async function generateQuickSummary(child, past, deepBriefings) {
+  const text = await callAIModel(buildQuickSummarySystem(), buildQuickSummaryPrompt(child, past, deepBriefings));
+  return text.replace(/```/g, "").trim();
+}
+
+function mockQuickSummary(child, past, deepBriefings) {
+  const n = childGivenName(child.name);
+  const nTopic = withTopicParticle(n);
+  if (!(past || []).length && !(deepBriefings || []).length) return `${nTopic} 아직 누적된 수업 기록이 없습니다.`;
+  const lastTopic = past && past[0] && past[0].topic;
+  return `${nTopic} 최근 ${lastTopic ? `'${lastTopic}' 등의 수업에서` : "여러 수업에서"} 꾸준한 참여를 보이고 있습니다. (테스트 모드 요약)`;
+}
+
 function mockGenerate(child, batch) {
   const topicList = batch.map(b => (b.topic || "").trim()).filter(Boolean);
   const cleanTopics = topicList.filter(t => /[가-힣a-zA-Z]{2,}/.test(t)); // 테스트용 낙서(ㅇㅁㅇㅁ 등) 걸러내기
@@ -2792,7 +2831,7 @@ function ScheduleTree({ schedule, children, teachers = [], classFilter, briefing
   );
 }
 
-function DailyBriefingPanel({ child, slot, date, setDate, briefings, references, deepBriefings, testMode, onSubmit, onDelete, onSaveDraft, onMarkAbsent, onCancelSlot, onSaveFocusedDeep, goToChild, allBriefingsForChild, notify, onBack, isMobile, setSelectedDeepId, setView }) {
+function DailyBriefingPanel({ child, slot, date, setDate, briefings, references, deepBriefings, testMode, onSubmit, onDelete, onSaveDraft, onMarkAbsent, onCancelSlot, onSaveFocusedDeep, onUpdateChild, goToChild, allBriefingsForChild, notify, onBack, isMobile, setSelectedDeepId, setView }) {
   const [isMakeup, setIsMakeup] = useState(false);
   const draftKey = `draft:${child.id}:${date}:${isMakeup ? "makeup" : "regular"}`;
   const existing = briefings.find(b => b.childId === child.id && b.date === date && b.status === "completed" && !!b.isMakeup === isMakeup);
@@ -2804,6 +2843,7 @@ function DailyBriefingPanel({ child, slot, date, setDate, briefings, references,
   const [expandedIds, setExpandedIds] = useState(() => new Set());
   const [showPicker, setShowPicker] = useState(false);
   const [pickerIds, setPickerIds] = useState(() => new Set());
+  const [summaryGenerating, setSummaryGenerating] = useState(false);
   const [focusedGenerating, setFocusedGenerating] = useState(false);
   const [focusedRegenKey, setFocusedRegenKey] = useState(null);
   const [focusedDraft, setFocusedDraft] = useState(null); // { sections, batch, isTestMode }
@@ -2907,6 +2947,21 @@ function DailyBriefingPanel({ child, slot, date, setDate, briefings, references,
     if (a.date !== b.date) return new Date(b.date) - new Date(a.date);
     return a.type === "daily" ? -1 : 1;
   });
+
+  const generateQuickSummaryNow = async () => {
+    setSummaryGenerating(true);
+    try {
+      let text;
+      if (testMode) text = mockQuickSummary(child, past, myFocusedBriefings);
+      else text = await generateQuickSummary(child, past, myFocusedBriefings);
+      if (onUpdateChild) onUpdateChild({ ...child, quickSummary: text, quickSummaryUpdatedAt: new Date().toISOString() });
+      notify("핵심 요약을 업데이트했습니다.");
+    } catch (e) {
+      console.error("핵심 요약 생성 실패:", e);
+      notify(`핵심 요약 생성에 실패했습니다: ${e?.message || e}`, "error");
+    }
+    setSummaryGenerating(false);
+  };
 
   const toggleExpand = (key) => setExpandedIds(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n; });
   const togglePick = (id) => setPickerIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
@@ -3042,6 +3097,23 @@ function DailyBriefingPanel({ child, slot, date, setDate, briefings, references,
 
         {!loaded ? <div className="py-10 flex justify-center"><Loader2 className="w-5 h-5 animate-spin text-blue-900" /></div> : (
           <div className="space-y-4">
+            <div className="bg-blue-50 border border-blue-100 rounded-lg px-3 py-2.5">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[11px] font-medium text-blue-900 flex items-center gap-1"><Sparkles className="w-3 h-3" /> 핵심 요약</span>
+                <button onClick={generateQuickSummaryNow} disabled={summaryGenerating} className="text-[11px] text-blue-700 hover:underline disabled:opacity-40 flex items-center gap-1">
+                  {summaryGenerating ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+                  {child.quickSummary ? "다시 생성" : "요약 생성"}
+                </button>
+              </div>
+              {child.quickSummary ? (
+                <>
+                  <p className="text-xs text-slate-700 mt-1 leading-relaxed">{child.quickSummary}</p>
+                  {child.quickSummaryUpdatedAt && <p className="text-[10px] text-slate-400 mt-1">업데이트 · {formatDate(child.quickSummaryUpdatedAt)}</p>}
+                </>
+              ) : (
+                <p className="text-xs text-slate-400 mt-1">이전 수업 기록과 집중브리핑을 종합한 요약이 아직 없습니다. "요약 생성"을 눌러 만들어보세요.</p>
+              )}
+            </div>
             <div><label className="text-xs text-slate-500">수업 주제</label><input value={form.topic} onChange={e => set("topic", e.target.value)} placeholder="예) 찰흙으로 동물 만들기" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" /></div>
             <div><label className="text-xs text-slate-500 font-medium">교사 종합 브리핑</label><AutoTextarea value={form.teacherSummary} onChange={e => set("teacherSummary", e.target.value)} /></div>
             {[
@@ -3386,7 +3458,103 @@ function ScheduleManager({ schedule, children, teachers = [], onSave, onClose })
   );
 }
 
-function ScheduleView({ schedule, children, teachers, classFilter, briefings, attendance, draftIndex, deepBriefings, role, teacherName, testMode, references, onSubmitBriefing, onDeleteBriefing, onSaveDraftIndex, onMarkAbsent, onCancelSlot, onSaveSchedule, onSaveFocusedDeep, target, clearTarget, notify, isMobile, setSelectedDeepId, setView }) {
+/* ---------------------------------------------------------
+   브리핑 단어 검색: 수업 기록 화면 하단에서 일일 기록 + 집중브리핑
+   본문에 특정 단어가 들어간 항목을 찾아 그 아이 페이지로 바로 이동
+--------------------------------------------------------- */
+function buildSearchSnippet(text, keyword, context = 24) {
+  if (!text) return "";
+  const idx = text.indexOf(keyword);
+  if (idx === -1) return text.length > context * 2 ? text.slice(0, context * 2) + "…" : text;
+  const start = Math.max(0, idx - context);
+  const end = Math.min(text.length, idx + keyword.length + context);
+  return (start > 0 ? "…" : "") + text.slice(start, end) + (end < text.length ? "…" : "");
+}
+
+function BriefingSearchBox({ children, briefings, deepBriefings, onOpenChild }) {
+  const [keyword, setKeyword] = useState("");
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 5;
+  const childById = Object.fromEntries(children.map(c => [c.id, c]));
+
+  const results = React.useMemo(() => {
+    const kw = keyword.trim();
+    if (!kw) return [];
+    const out = [];
+    briefings.forEach(b => {
+      if (b.status !== "completed") return;
+      const child = childById[b.childId];
+      if (!child) return;
+      const hit = [b.topic, b.teacherSummary, b.antecedent, b.behavior, b.consequence].find(f => f && f.includes(kw));
+      if (hit) {
+        out.push({
+          key: `daily-${b.id}`, type: "daily", childId: b.childId, childName: child.name, className: child.className,
+          date: b.date, snippet: buildSearchSnippet(hit, kw),
+        });
+      }
+    });
+    (deepBriefings || []).forEach(d => {
+      const child = childById[d.childId];
+      if (!child) return;
+      for (const s of SECTION_DEFS) {
+        const text = d.sections?.[s.key];
+        if (text && text.includes(kw)) {
+          out.push({
+            key: `deep-${d.id}-${s.key}`, type: "deep", childId: d.childId, childName: child.name, className: child.className,
+            date: (d.updatedAt || d.createdAt || "").slice(0, 10), snippet: buildSearchSnippet(text, kw), sectionLabel: s.label,
+          });
+          break;
+        }
+      }
+    });
+    out.sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
+    return out;
+  }, [keyword, briefings, deepBriefings, children]);
+
+  useEffect(() => { setPage(1); }, [keyword]);
+
+  const totalPages = Math.max(1, Math.ceil(results.length / PAGE_SIZE));
+  const pageItems = results.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  return (
+    <div className="bg-white rounded-xl border border-slate-200 p-4 mt-4 space-y-3">
+      <div className="text-xs font-semibold text-slate-500 flex items-center gap-1.5"><Search className="w-3.5 h-3.5" /> 브리핑 단어 검색</div>
+      <div className="relative">
+        <Search className="w-3.5 h-3.5 text-slate-300 absolute left-2.5 top-1/2 -translate-y-1/2" />
+        <input value={keyword} onChange={e => setKeyword(e.target.value)} placeholder="예) 민감한" className="w-full border border-slate-200 rounded-lg pl-8 pr-3 py-2 text-sm" />
+      </div>
+      {!keyword.trim() ? (
+        <p className="text-xs text-slate-400 py-2">검색어를 입력하면 그 단어가 포함된 브리핑을 찾아드립니다.</p>
+      ) : results.length === 0 ? (
+        <p className="text-xs text-slate-400 py-2">"{keyword}"가 포함된 브리핑이 없습니다.</p>
+      ) : (
+        <>
+          <div className="space-y-1.5">
+            {pageItems.map(r => (
+              <button key={r.key} onClick={() => onOpenChild(r.childId)} className="w-full text-left border border-slate-100 rounded-lg px-3 py-2 hover:border-blue-200 hover:bg-blue-50/40">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-semibold text-slate-700">{r.childName} <span className="text-slate-400 font-normal">· {r.className}</span></span>
+                  <span className="text-[10px] text-slate-400 shrink-0">{r.type === "deep" ? `집중브리핑 · ${r.sectionLabel}` : "일일 기록"} · {formatDate(r.date)}</span>
+                </div>
+                <div className="text-xs text-slate-500 mt-1 leading-relaxed">{r.snippet}</div>
+              </button>
+            ))}
+          </div>
+          <div className="flex items-center justify-between pt-1">
+            <span className="text-[11px] text-slate-400">{results.length}건 중 {(page - 1) * PAGE_SIZE + 1}-{Math.min(page * PAGE_SIZE, results.length)}</span>
+            <div className="flex items-center gap-1">
+              <button disabled={page <= 1} onClick={() => setPage(p => p - 1)} className="p-1.5 rounded-md border border-slate-200 text-slate-500 disabled:opacity-30 hover:bg-slate-50"><ArrowLeft className="w-3.5 h-3.5" /></button>
+              <span className="text-[11px] text-slate-400 px-1">{page} / {totalPages}</span>
+              <button disabled={page >= totalPages} onClick={() => setPage(p => p + 1)} className="p-1.5 rounded-md border border-slate-200 text-slate-500 disabled:opacity-30 hover:bg-slate-50"><ArrowRight className="w-3.5 h-3.5" /></button>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function ScheduleView({ schedule, children, teachers, classFilter, briefings, attendance, draftIndex, deepBriefings, role, teacherName, testMode, references, onSubmitBriefing, onDeleteBriefing, onSaveDraftIndex, onMarkAbsent, onCancelSlot, onSaveSchedule, onSaveFocusedDeep, onUpdateChild, target, clearTarget, notify, isMobile, setSelectedDeepId, setSelectedChildId, setView }) {
   const [date, setDate] = useState(todayISO());
   const [selected, setSelected] = useState(null); // {child, slot}
   const [showManager, setShowManager] = useState(false);
@@ -3433,6 +3601,10 @@ function ScheduleView({ schedule, children, teachers, classFilter, briefings, at
             onSelect={(c, slot) => { setSelected({ child: c, slot }); setMobileShowForm(true); }}
             target={null} onManage={() => setShowManager(true)}
           />
+          <BriefingSearchBox
+            children={children} briefings={briefings} deepBriefings={deepBriefings}
+            onOpenChild={(cid) => { setSelectedChildId(cid); setView("childDetail"); }}
+          />
         </div>
         <div style={{ minWidth: 0 }} className={isMobile && !mobileShowForm ? "hidden" : "block"}>
           {selected ? (
@@ -3446,6 +3618,7 @@ function ScheduleView({ schedule, children, teachers, classFilter, briefings, at
               onMarkAbsent={(cid, d, slot) => { onMarkAbsent(cid, d, slot); }}
               onCancelSlot={(slot) => onCancelSlot(slot, date)}
               onSaveFocusedDeep={onSaveFocusedDeep}
+              onUpdateChild={onUpdateChild}
               goToChild={goToChild}
               notify={notify}
               onBack={() => setMobileShowForm(false)}
@@ -3905,11 +4078,13 @@ function App() {
               onCancelSlot={cancelSlot}
               onSaveSchedule={updateSchedule}
               onSaveFocusedDeep={saveFocusedDeepBriefing}
+              onUpdateChild={editChild}
               target={scheduleTarget}
               clearTarget={() => setScheduleTarget(null)}
               notify={notify}
               isMobile={isMobile}
               setSelectedDeepId={setSelectedDeepId}
+              setSelectedChildId={setSelectedChildId}
               setView={setView}
             />
           )}
