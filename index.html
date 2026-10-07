@@ -1642,7 +1642,7 @@ function DashboardMonthView({ schedule, briefings, deepBriefings, attendance, sc
 /* ---------------------------------------------------------
    아이 관리
 --------------------------------------------------------- */
-function ChildForm({ initial, schedule = [], teachers = [], initialSlotIds = [], onCancel, onSave }) {
+function ChildForm({ initial, schedule = [], teachers = [], initialSlotIds = [], onEnsureSlot, onCancel, onSave }) {
   const [form, setForm] = useState(initial || { name: "", age: "", grade: "", teacher: "", className: "", parentNeeds: "", classNotes: "" });
   const [slotIds, setSlotIds] = useState(initialSlotIds);
   const [pendingDay, setPendingDay] = useState(DAYS[0]);
@@ -1654,10 +1654,33 @@ function ChildForm({ initial, schedule = [], teachers = [], initialSlotIds = [],
   };
   const hasUnknownTeacher = form.teacher && !teachers.some(t => t.name === form.teacher);
 
-  const daySlotOptions = schedule.filter(s => s.day === pendingDay && (!form.teacher || s.teacher === form.teacher)).sort((a, b) => a.order - b.order);
+  // 담당 교사가 정해져 있으면, 그 교사가 그 요일에 실제로 교시를 등록해뒀는지와 상관없이
+  // 학원의 표준 시간대(1~4/5교시)를 항상 선택할 수 있게 보여줍니다. 아직 한 번도
+  // 등록된 적 없는 조합을 선택해 "추가"를 누르면 그 자리에서 교시가 자동으로 만들어집니다.
+  const daySlotOptions = React.useMemo(() => {
+    const real = schedule.filter(s => s.day === pendingDay && (!form.teacher || s.teacher === form.teacher)).sort((a, b) => a.order - b.order);
+    if (!form.teacher) return real;
+    const presets = presetsForDay(pendingDay);
+    const merged = presets.map((p, i) => {
+      const match = real.find(s => s.name === p.label);
+      return match || { id: `virtual:${pendingDay}:${p.label}`, name: p.label, startTime: p.start, endTime: p.end, teacher: form.teacher, isVirtual: true, order: i + 1 };
+    });
+    real.forEach(s => { if (!presets.some(p => p.label === s.name)) merged.push(s); });
+    return merged.sort((a, b) => a.order - b.order);
+  }, [schedule, pendingDay, form.teacher]);
   useEffect(() => { setPendingSlotId(daySlotOptions[0]?.id || ""); }, [pendingDay, schedule.length, form.teacher]); // eslint-disable-line
   const slotById = Object.fromEntries(schedule.map(s => [s.id, s]));
-  const addSlot = () => { if (pendingSlotId && !slotIds.includes(pendingSlotId)) setSlotIds(prev => [...prev, pendingSlotId]); };
+  const addSlot = () => {
+    if (!pendingSlotId) return;
+    const opt = daySlotOptions.find(s => s.id === pendingSlotId);
+    if (!opt) return;
+    if (opt.isVirtual) {
+      const realId = onEnsureSlot && onEnsureSlot(pendingDay, { label: opt.name, start: opt.startTime, end: opt.endTime }, form.teacher);
+      if (realId && !slotIds.includes(realId)) setSlotIds(prev => [...prev, realId]);
+    } else if (!slotIds.includes(opt.id)) {
+      setSlotIds(prev => [...prev, opt.id]);
+    }
+  };
   const removeSlot = (id) => setSlotIds(prev => prev.filter(x => x !== id));
 
   return (
@@ -1686,8 +1709,8 @@ function ChildForm({ initial, schedule = [], teachers = [], initialSlotIds = [],
           <div className="col-span-2"><label className="text-xs text-slate-500">반 · 담당 교사 선택 시 자동 입력</label><input value={form.className} disabled className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1 bg-slate-50 text-slate-500" /></div>
           <div className="col-span-2">
             <label className="text-xs text-slate-500">요일 및 교시 배정 (수업 기록 명단에 반영됩니다)</label>
-            {schedule.length === 0 ? (
-              <p className="text-xs text-slate-400 border border-dashed border-slate-200 rounded-lg px-3 py-3 mt-1">등록된 교시가 없습니다. 수업 기록 화면의 '요일 · 교시 관리'에서 먼저 교시를 추가해주세요.</p>
+            {!form.teacher ? (
+              <p className="text-xs text-slate-400 border border-dashed border-slate-200 rounded-lg px-3 py-3 mt-1">담당 교사를 먼저 선택하면 그 교사의 표준 시간대가 자동으로 나타납니다.</p>
             ) : (
               <div className="mt-1 space-y-2">
                 <div className="flex gap-1.5">
@@ -1733,7 +1756,7 @@ function ChildForm({ initial, schedule = [], teachers = [], initialSlotIds = [],
   );
 }
 
-function ChildrenList({ children, schedule, teachers, briefings, deepBriefings, role, teacherName, setView, setSelectedChildId, onAddChild }) {
+function ChildrenList({ children, schedule, teachers, briefings, deepBriefings, role, teacherName, setView, setSelectedChildId, onAddChild, onEnsureSlot }) {
   const [search, setSearch] = useState("");
   const [teacherFilter, setTeacherFilter] = useState("전체");
   const [classFilter, setClassFilter] = useState("전체");
@@ -1785,7 +1808,7 @@ function ChildrenList({ children, schedule, teachers, briefings, deepBriefings, 
         })}
         {filtered.length === 0 && <p className="text-sm text-slate-400 col-span-full py-8 text-center">조건에 맞는 아이가 없습니다.</p>}
       </div>
-      {showForm && <ChildForm schedule={schedule} teachers={teachers} onCancel={() => setShowForm(false)} onSave={(form, slotIds) => { onAddChild(form, slotIds); setShowForm(false); }} />}
+      {showForm && <ChildForm schedule={schedule} teachers={teachers} onEnsureSlot={onEnsureSlot} onCancel={() => setShowForm(false)} onSave={(form, slotIds) => { onAddChild(form, slotIds); setShowForm(false); }} />}
     </div>
   );
 }
@@ -2093,7 +2116,7 @@ function DailyBriefingForm({ child, editing, onCancel, onSave }) {
 /* ---------------------------------------------------------
    아이 상세 페이지
 --------------------------------------------------------- */
-function ChildDetail({ child, schedule, teachers, briefings, deepBriefings, role, generating, onUpdateChild, onWithdrawChild, onReinstateChild, onAddBriefing, onUpdateBriefing, onDeleteBriefing, onGenerateDeep, setView, setSelectedDeepId }) {
+function ChildDetail({ child, schedule, teachers, briefings, deepBriefings, role, generating, onUpdateChild, onWithdrawChild, onReinstateChild, onAddBriefing, onUpdateBriefing, onDeleteBriefing, onGenerateDeep, onEnsureSlot, setView, setSelectedDeepId }) {
   const [tab, setTab] = useState("timeline");
   const [showForm, setShowForm] = useState(false);
   const [editingBriefing, setEditingBriefing] = useState(null);
@@ -2247,7 +2270,7 @@ function ChildDetail({ child, schedule, teachers, briefings, deepBriefings, role
           onSave={(data) => { if (editingBriefing) onUpdateBriefing({ ...editingBriefing, ...data }); else onAddBriefing({ id: uid(), childId: child.id, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), ...data }); setShowForm(false); }} />
       )}
       {editingInfo && (
-        <ChildForm initial={child} schedule={schedule} teachers={teachers} initialSlotIds={mySlotIds} onCancel={() => setEditingInfo(false)}
+        <ChildForm initial={child} schedule={schedule} teachers={teachers} initialSlotIds={mySlotIds} onEnsureSlot={onEnsureSlot} onCancel={() => setEditingInfo(false)}
           onSave={(form, slotIds) => { onUpdateChild({ ...child, ...form }, slotIds); setEditingInfo(false); }} />
       )}
     </div>
@@ -3933,6 +3956,18 @@ function App() {
     if (a) updateAccounts(accounts.filter(x => x.id !== a.id));
   };
 
+  // 아이 등록/수정 화면에서 교사의 "1~4(또는 5)교시" 같은 표준 시간대를 고를 때,
+  // 그 교사가 그 요일에 아직 등록해둔 교시가 없더라도 표준 시간대 기준으로
+  // 즉시 교시를 새로 만들어줍니다 (요일·교시 관리에서 먼저 등록해둘 필요가 없습니다).
+  const ensureScheduleSlot = (day, preset, teacherName) => {
+    const existing = schedule.find(s => s.day === day && s.teacher === teacherName && s.name === preset.label);
+    if (existing) return existing.id;
+    const order = presetsForDay(day).findIndex(p => p.label === preset.label);
+    const newSlot = { id: uid(), day, name: preset.label, startTime: preset.start, endTime: preset.end, teacher: teacherName, childIds: [], order: order >= 0 ? order + 1 : (schedule.filter(s => s.day === day).length + 1) };
+    updateSchedule([...schedule, newSlot]);
+    return newSlot.id;
+  };
+
   const syncChildSlots = (childId, slotIds) => {
     updateSchedule(schedule.map(s => {
       const has = s.childIds.includes(childId);
@@ -4098,7 +4133,7 @@ function App() {
             />
           )}
           {view === "children" && (
-            <ChildrenList children={children} schedule={schedule} teachers={teachers} briefings={briefings} deepBriefings={deepBriefings} role={role} teacherName={teacherName} setView={setView} setSelectedChildId={setSelectedChildId} onAddChild={addChild} />
+            <ChildrenList children={children} schedule={schedule} teachers={teachers} briefings={briefings} deepBriefings={deepBriefings} role={role} teacherName={teacherName} setView={setView} setSelectedChildId={setSelectedChildId} onAddChild={addChild} onEnsureSlot={ensureScheduleSlot} />
           )}
           {view === "teachers" && (
             <TeacherManager teachers={teachers} accounts={accounts} children={children} schedule={schedule} onSave={saveTeacherAccount} onDelete={deleteTeacherAccount} onResetPassword={resetAccountPassword} />
@@ -4111,7 +4146,7 @@ function App() {
               child={selectedChild} schedule={schedule} teachers={teachers} briefings={briefings} deepBriefings={deepBriefings} role={role} generating={generating}
               onUpdateChild={editChild} onWithdrawChild={withdrawChild} onReinstateChild={reinstateChild}
               onAddBriefing={addBriefing} onUpdateBriefing={editBriefing} onDeleteBriefing={deleteBriefing}
-              onGenerateDeep={handleGenerateDeep} setView={setView} setSelectedDeepId={setSelectedDeepId}
+              onGenerateDeep={handleGenerateDeep} onEnsureSlot={ensureScheduleSlot} setView={setView} setSelectedDeepId={setSelectedDeepId}
             />
           )}
           {view === "deepList" && (
