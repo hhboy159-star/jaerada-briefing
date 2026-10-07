@@ -977,7 +977,6 @@ function Sidebar({ view, setView, role, account, onLogout, onOpenChangePassword,
     { key: "teachers", label: "교사 관리", icon: UserCog },
     { key: "withdrawn", label: "퇴원 관리", icon: UserX },
     { key: "references", label: "참고자료 관리", icon: BookOpen },
-    ...(role === "admin" ? [{ key: "accounts", label: "계정 관리", icon: ShieldCheck }] : []),
   ];
   const scheduleActive = view === "schedule";
   // 사이드바 표시 여부/위치는 Tailwind의 md: 같은 CSS 미디어쿼리 브레이크포인트에 기대지 않고
@@ -1655,8 +1654,8 @@ function ChildForm({ initial, schedule = [], teachers = [], initialSlotIds = [],
   };
   const hasUnknownTeacher = form.teacher && !teachers.some(t => t.name === form.teacher);
 
-  const daySlotOptions = schedule.filter(s => s.day === pendingDay).sort((a, b) => a.order - b.order);
-  useEffect(() => { setPendingSlotId(daySlotOptions[0]?.id || ""); }, [pendingDay, schedule.length]); // eslint-disable-line
+  const daySlotOptions = schedule.filter(s => s.day === pendingDay && (!form.teacher || s.teacher === form.teacher)).sort((a, b) => a.order - b.order);
+  useEffect(() => { setPendingSlotId(daySlotOptions[0]?.id || ""); }, [pendingDay, schedule.length, form.teacher]); // eslint-disable-line
   const slotById = Object.fromEntries(schedule.map(s => [s.id, s]));
   const addSlot = () => { if (pendingSlotId && !slotIds.includes(pendingSlotId)) setSlotIds(prev => [...prev, pendingSlotId]); };
   const removeSlot = (id) => setSlotIds(prev => prev.filter(x => x !== id));
@@ -1834,60 +1833,109 @@ function WithdrawnList({ children, briefings, setView, setSelectedChildId, onRei
 /* ---------------------------------------------------------
    교사 관리
 --------------------------------------------------------- */
-function TeacherManager({ teachers, children, schedule, onAdd, onEdit, onDelete }) {
-  const blank = { name: "", className: "" };
+function TeacherManager({ teachers, accounts, children, schedule, onSave, onDelete, onResetPassword }) {
+  const blank = { name: "", classOrTitle: "", username: "", role: "teacher", hasClass: true };
   const [form, setForm] = useState(blank);
-  const [editingId, setEditingId] = useState(null);
+  const [editing, setEditing] = useState(null); // { accountId, teacherId } | null
 
-  const startEdit = (t) => { setForm({ name: t.name, className: t.className }); setEditingId(t.id); };
-  const cancelEdit = () => { setForm(blank); setEditingId(null); };
-  const submit = () => {
-    if (!form.name || !form.className) return;
-    if (editingId) onEdit({ id: editingId, ...form });
-    else onAdd(form);
-    cancelEdit();
-  };
+  // 교사(수업 반) 목록과 계정(로그인) 목록을 이름으로 짝지어 하나의 행으로 합칩니다.
+  const rows = React.useMemo(() => {
+    const result = [];
+    const usedTeacherIds = new Set();
+    accounts.forEach(a => {
+      const t = a.linkedTeacherName ? teachers.find(x => x.name === a.linkedTeacherName) : null;
+      if (t) usedTeacherIds.add(t.id);
+      result.push({ key: `a-${a.id}`, account: a, teacher: t || null });
+    });
+    teachers.forEach(t => {
+      if (!usedTeacherIds.has(t.id)) result.push({ key: `t-${t.id}`, account: null, teacher: t });
+    });
+    return result;
+  }, [accounts, teachers]);
 
   const countFor = (name) => ({
     children: children.filter(c => c.teacher === name && c.status !== "withdrawn").length,
     slots: schedule.filter(s => s.teacher === name).length,
   });
 
+  const startEdit = (row) => {
+    const a = row.account, t = row.teacher;
+    setForm({
+      name: a?.name || t?.name || "",
+      classOrTitle: a?.classOrTitle || t?.className || "",
+      username: a?.username || "",
+      role: a?.role || "teacher",
+      hasClass: !!t,
+    });
+    setEditing({ accountId: a?.id || null, teacherId: t?.id || null, isSuperAdmin: !!a?.isSuperAdmin });
+  };
+  const cancelEdit = () => { setForm(blank); setEditing(null); };
+  const submit = () => {
+    if (!form.name || !form.username || (form.hasClass && !form.classOrTitle)) return;
+    onSave({ ...form, name: form.name.trim(), classOrTitle: form.classOrTitle.trim(), username: form.username.trim() }, editing);
+    cancelEdit();
+  };
+
   return (
     <div className="space-y-5">
       <h1 className="text-2xl font-bold text-slate-800">교사 관리</h1>
-      <p className="text-sm text-slate-500">교사를 등록해두면 아이 등록 시 교사를 선택하는 것만으로 담당 반이 자동으로 입력됩니다.</p>
+      <p className="text-sm text-slate-500">교사 등록과 로그인 계정 생성이 한 화면에서 함께 이루어집니다. 수업 반을 운영하는 교사는 "수업 반 운영"을 체크하면 시간표 배정과 아이 등록에서 바로 선택할 수 있고, 상담실장처럼 수업 반이 없는 관리 계정은 체크를 해제하면 됩니다.</p>
 
       <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-3">
+        <h2 className="text-sm font-semibold text-slate-700">{editing ? "교사 정보 수정" : "새 교사 등록"}</h2>
         <div className="grid sm:grid-cols-2 gap-3">
-          <div><label className="text-xs text-slate-500">교사 이름</label><input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="예) 김청명" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" /></div>
-          <div><label className="text-xs text-slate-500">담당 반</label><input value={form.className} onChange={e => setForm({ ...form, className: e.target.value })} placeholder="예) 1반" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" /></div>
+          <div><label className="text-xs text-slate-500">이름</label><input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="예) 김청명" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" /></div>
+          <div><label className="text-xs text-slate-500">전화번호 아이디 (로그인용)</label><input value={form.username} disabled={!!editing?.accountId} onChange={e => setForm({ ...form, username: e.target.value })} placeholder="예) 41226619" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1 disabled:bg-slate-50 disabled:text-slate-400" /></div>
+          <div>
+            <label className="text-xs text-slate-500 flex items-center gap-1.5">
+              <input type="checkbox" checked={form.hasClass} onChange={e => setForm({ ...form, hasClass: e.target.checked })} className="rounded" /> 수업 반 운영 (시간표 배정 가능)
+            </label>
+            <input value={form.classOrTitle} onChange={e => setForm({ ...form, classOrTitle: e.target.value })} placeholder={form.hasClass ? "예) 1반" : "예) 상담실장"} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" />
+          </div>
+          <div>
+            <label className="text-xs text-slate-500">권한</label>
+            <select value={form.role} onChange={e => setForm({ ...form, role: e.target.value })} disabled={editing?.isSuperAdmin} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1 disabled:bg-slate-50 disabled:text-slate-400">
+              <option value="teacher">교사</option>
+              <option value="admin">관리자</option>
+            </select>
+          </div>
         </div>
+        {!editing && <p className="text-[11px] text-slate-400">초기 비밀번호는 1234로 자동 설정됩니다.</p>}
         <div className="flex justify-end gap-2">
-          {editingId && <button onClick={cancelEdit} className="px-4 py-2 text-sm rounded-lg text-slate-500 hover:bg-slate-50">취소</button>}
-          <button onClick={submit} disabled={!form.name || !form.className} className="flex items-center gap-1.5 bg-blue-900 text-white text-sm font-medium px-4 py-2 rounded-lg hover:bg-blue-800 disabled:opacity-40">
-            {editingId ? <><Save className="w-4 h-4" /> 수정 저장</> : <><Plus className="w-4 h-4" /> 교사 등록</>}
+          {editing && <button onClick={cancelEdit} className="px-4 py-2 text-sm rounded-lg text-slate-500 hover:bg-slate-50">취소</button>}
+          <button onClick={submit} disabled={!form.name || !form.username || (form.hasClass && !form.classOrTitle)} className="flex items-center gap-1.5 bg-blue-900 text-white text-sm font-medium px-4 py-2 rounded-lg hover:bg-blue-800 disabled:opacity-40">
+            {editing ? <><Save className="w-4 h-4" /> 수정 저장</> : <><Plus className="w-4 h-4" /> 교사 등록</>}
           </button>
         </div>
       </div>
 
       <div className="space-y-2">
-        {teachers.map(t => {
-          const cnt = countFor(t.name);
+        {rows.map(row => {
+          const a = row.account, t = row.teacher;
+          const cnt = t ? countFor(t.name) : null;
           return (
-            <div key={t.id} className="bg-white rounded-xl border border-slate-200 p-4 flex items-center justify-between">
+            <div key={row.key} className="bg-white rounded-xl border border-slate-200 p-4 flex items-center justify-between flex-wrap gap-2">
               <div>
-                <div className="text-sm font-semibold text-slate-800">{t.name} <span className="text-slate-400 font-normal">· {t.className}</span></div>
-                <div className="text-xs text-slate-400 mt-0.5">담당 아이 {cnt.children}명 · 배정된 교시 {cnt.slots}개</div>
+                <div className="text-sm font-semibold text-slate-800 flex items-center gap-2 flex-wrap">
+                  {a?.name || t?.name} <span className="text-slate-400 font-normal">· {a?.classOrTitle || t?.className}</span>
+                  {a?.isSuperAdmin && <Badge color="navy">최고 관리자</Badge>}
+                  {a && <Badge color={a.role === "admin" ? "blue" : "slate"}>{a.role === "admin" ? "관리자" : "교사"}</Badge>}
+                </div>
+                <div className="text-xs text-slate-400 mt-0.5">
+                  {a ? `아이디 ${a.username}` : "로그인 계정 없음"}
+                  {cnt ? ` · 담당 아이 ${cnt.children}명 · 배정된 교시 ${cnt.slots}개` : ""}
+                  {a?.lastLogin ? ` · 최근 로그인 ${formatDate(a.lastLogin)}` : ""}
+                </div>
               </div>
-              <div className="flex gap-1">
-                <button onClick={() => startEdit(t)} className="p-1.5 rounded-md hover:bg-slate-50 text-slate-400"><Edit2 className="w-3.5 h-3.5" /></button>
-                <button onClick={() => onDelete(t.id)} className="p-1.5 rounded-md hover:bg-red-50 text-red-400"><Trash2 className="w-3.5 h-3.5" /></button>
+              <div className="flex gap-1.5">
+                {!a?.isSuperAdmin && <button onClick={() => startEdit(row)} className="p-1.5 rounded-md hover:bg-slate-50 text-slate-400"><Edit2 className="w-3.5 h-3.5" /></button>}
+                {a && <button onClick={() => { if (confirm(`${a.name} 계정의 비밀번호를 1234로 초기화할까요?`)) onResetPassword(a.id); }} className="text-[11px] text-slate-400 border border-slate-200 rounded-md px-2 py-1.5 hover:bg-slate-50">비밀번호 초기화</button>}
+                {!a?.isSuperAdmin && <button onClick={() => onDelete(row)} className="p-1.5 rounded-md hover:bg-red-50 text-red-400"><Trash2 className="w-3.5 h-3.5" /></button>}
               </div>
             </div>
           );
         })}
-        {teachers.length === 0 && <p className="text-sm text-slate-400 text-center py-10">등록된 교사가 없습니다.</p>}
+        {rows.length === 0 && <p className="text-sm text-slate-400 text-center py-10">등록된 교사가 없습니다.</p>}
       </div>
     </div>
   );
@@ -1980,78 +2028,6 @@ function ChangePasswordModal({ account, onClose, onChange, notify }) {
           <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg text-slate-500 hover:bg-slate-50">취소</button>
           <button onClick={submit} disabled={busy || !current || !next || !confirm} className="px-4 py-2 text-sm rounded-lg bg-blue-900 text-white font-medium hover:bg-blue-800 disabled:opacity-40">변경</button>
         </div>
-      </div>
-    </div>
-  );
-}
-
-function AccountManager({ accounts, teachers, onCreate, onUpdate, onResetPassword }) {
-  const blank = { name: "", classOrTitle: "", username: "", role: "teacher", linkedTeacherName: "" };
-  const [form, setForm] = useState(blank);
-  const [editingId, setEditingId] = useState(null);
-
-  const startEdit = (a) => { setForm({ name: a.name, classOrTitle: a.classOrTitle, username: a.username, role: a.role, linkedTeacherName: a.linkedTeacherName || "" }); setEditingId(a.id); };
-  const cancel = () => { setForm(blank); setEditingId(null); };
-  const submit = async () => {
-    if (!form.name || !form.username || !form.classOrTitle) return;
-    if (editingId) await onUpdate({ id: editingId, ...form, linkedTeacherName: form.linkedTeacherName || null });
-    else await onCreate({ ...form, linkedTeacherName: form.linkedTeacherName || null });
-    cancel();
-  };
-
-  return (
-    <div className="space-y-5">
-      <h1 className="text-2xl font-bold text-slate-800">계정 관리</h1>
-      <p className="text-sm text-slate-500">전체 계정을 확인하고 새 계정을 만들거나 권한을 변경할 수 있습니다. 이 화면은 최고 관리자 계정에게만 보입니다.</p>
-
-      <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-3">
-        <h2 className="text-sm font-semibold text-slate-700">{editingId ? "계정 정보 수정" : "새 계정 생성"}</h2>
-        <div className="grid sm:grid-cols-2 gap-3">
-          <div><label className="text-xs text-slate-500">이름</label><input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" /></div>
-          <div><label className="text-xs text-slate-500">반 또는 직급</label><input value={form.classOrTitle} onChange={e => setForm({ ...form, classOrTitle: e.target.value })} placeholder="예) 4반 또는 부원장" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" /></div>
-          <div><label className="text-xs text-slate-500">전화번호 아이디</label><input value={form.username} disabled={!!editingId} onChange={e => setForm({ ...form, username: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1 disabled:bg-slate-50 disabled:text-slate-400" /></div>
-          <div>
-            <label className="text-xs text-slate-500">권한</label>
-            <select value={form.role} onChange={e => setForm({ ...form, role: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
-              <option value="teacher">교사</option>
-              <option value="admin">관리자</option>
-            </select>
-          </div>
-          <div className="sm:col-span-2">
-            <label className="text-xs text-slate-500">연결할 수업 반 (수업 기록 담당 교사와 연동 · 상담실장 등은 선택하지 않음)</label>
-            <select value={form.linkedTeacherName} onChange={e => setForm({ ...form, linkedTeacherName: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
-              <option value="">연결 안 함</option>
-              {teachers.map(t => <option key={t.id} value={t.name}>{t.name} ({t.className})</option>)}
-            </select>
-          </div>
-        </div>
-        {!editingId && <p className="text-[11px] text-slate-400">초기 비밀번호는 1234로 자동 설정됩니다.</p>}
-        <div className="flex justify-end gap-2">
-          {editingId && <button onClick={cancel} className="px-4 py-2 text-sm rounded-lg text-slate-500 hover:bg-slate-50">취소</button>}
-          <button onClick={submit} disabled={!form.name || !form.username || !form.classOrTitle} className="flex items-center gap-1.5 bg-blue-900 text-white text-sm font-medium px-4 py-2 rounded-lg hover:bg-blue-800 disabled:opacity-40">
-            {editingId ? <><Save className="w-4 h-4" /> 수정 저장</> : <><Plus className="w-4 h-4" /> 계정 생성</>}
-          </button>
-        </div>
-      </div>
-
-      <div className="space-y-2">
-        {accounts.map(a => (
-          <div key={a.id} className="bg-white rounded-xl border border-slate-200 p-4 flex items-center justify-between flex-wrap gap-2">
-            <div>
-              <div className="text-sm font-semibold text-slate-800 flex items-center gap-2 flex-wrap">
-                {a.name} <span className="text-slate-400 font-normal">· {a.classOrTitle}</span>
-                {a.isSuperAdmin && <Badge color="navy">최고 관리자</Badge>}
-                <Badge color={a.role === "admin" ? "blue" : "slate"}>{a.role === "admin" ? "관리자" : "교사"}</Badge>
-              </div>
-              <div className="text-xs text-slate-400 mt-0.5">아이디 {a.username}{a.linkedTeacherName ? ` · ${a.linkedTeacherName} 반 연동` : ""}{a.lastLogin ? ` · 최근 로그인 ${formatDate(a.lastLogin)}` : ""}</div>
-            </div>
-            <div className="flex gap-1.5">
-              {!a.isSuperAdmin && <button onClick={() => startEdit(a)} className="p-1.5 rounded-md hover:bg-slate-50 text-slate-400"><Edit2 className="w-3.5 h-3.5" /></button>}
-              <button onClick={() => { if (confirm(`${a.name} 계정의 비밀번호를 1234로 초기화할까요?`)) onResetPassword(a.id); }} className="text-[11px] text-slate-400 border border-slate-200 rounded-md px-2 py-1.5 hover:bg-slate-50">비밀번호 초기화</button>
-            </div>
-          </div>
-        ))}
-        {accounts.length === 0 && <p className="text-sm text-slate-400 text-center py-10">등록된 계정이 없습니다.</p>}
       </div>
     </div>
   );
@@ -3870,17 +3846,6 @@ function App() {
     await deleteKey("session_account_id", false);
     setView("dashboard");
   };
-  const addAccount = async (form) => {
-    const passwordHash = await hashPassword("1234", form.username);
-    const newAcc = { id: uid(), name: form.name, username: form.username, classOrTitle: form.classOrTitle, role: form.role, linkedTeacherName: form.linkedTeacherName, isSuperAdmin: false, passwordHash, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), lastLogin: null };
-    updateAccounts([...accounts, newAcc]);
-    notify("계정을 생성했습니다. 초기 비밀번호는 1234입니다.");
-  };
-  const editAccount = async (form) => {
-    updateAccounts(accounts.map(a => a.id === form.id ? { ...a, name: form.name, classOrTitle: form.classOrTitle, role: form.role, linkedTeacherName: form.linkedTeacherName, updatedAt: new Date().toISOString() } : a));
-    if (session?.id === form.id) { setSession(s => ({ ...s, ...form })); setRole(form.role); setTeacherName(form.linkedTeacherName || form.name); }
-    notify("계정 정보를 수정했습니다.");
-  };
   const resetAccountPassword = async (id) => {
     const acc = accounts.find(a => a.id === id);
     const passwordHash = await hashPassword("1234", acc.username);
@@ -3912,23 +3877,60 @@ function App() {
   const deleteMonthlyStar = (id) => updateMonthlyStars(monthlyStars.filter(x => x.id !== id));
   const updateTeachers = (next) => { setTeachers(next); saveKey("app_teachers", next); };
 
-  const addTeacher = (t) => updateTeachers([...teachers, { id: uid(), createdAt: new Date().toISOString(), ...t }]);
-  const editTeacher = (t) => {
-    const before = teachers.find(x => x.id === t.id);
-    updateTeachers(teachers.map(x => x.id === t.id ? t : x));
-    // 이름이나 반이 바뀌면 이미 배정된 아이·교시 표기도 함께 갱신
-    if (before && (before.name !== t.name || before.className !== t.className)) {
-      updateChildren(children.map(c => c.teacher === before.name ? { ...c, teacher: t.name, className: t.className } : c));
-      updateSchedule(schedule.map(s => s.teacher === before.name ? { ...s, teacher: t.name } : s));
+  // 교사 등록/수정과 로그인 계정 생성/수정을 한 화면·한 번의 저장으로 함께 처리합니다.
+  // form: { name, classOrTitle, username, role, hasClass }
+  // editing: { accountId, teacherId, isSuperAdmin } | null
+  const saveTeacherAccount = async (form, editing) => {
+    const name = form.name.trim();
+    const classOrTitle = form.classOrTitle.trim();
+    const username = form.username.trim();
+
+    // 1) 수업 반(교사) 정보 동기화
+    let teacherId = editing?.teacherId || null;
+    if (form.hasClass) {
+      if (teacherId) {
+        const before = teachers.find(x => x.id === teacherId);
+        updateTeachers(teachers.map(x => x.id === teacherId ? { ...x, name, className: classOrTitle } : x));
+        if (before && (before.name !== name || before.className !== classOrTitle)) {
+          updateChildren(children.map(c => c.teacher === before.name ? { ...c, teacher: name, className: classOrTitle } : c));
+          updateSchedule(schedule.map(s => s.teacher === before.name ? { ...s, teacher: name } : s));
+        }
+      } else {
+        teacherId = uid();
+        updateTeachers([...teachers, { id: teacherId, name, className: classOrTitle, createdAt: new Date().toISOString() }]);
+      }
+    } else if (teacherId) {
+      // "수업 반 운영" 체크를 해제해 교사(수업 반) 연동을 없애려는 경우
+      const t = teachers.find(x => x.id === teacherId);
+      if (t && (children.some(c => c.teacher === t.name) || schedule.some(s => s.teacher === t.name))) {
+        notify("이 교사가 배정된 아이 또는 교시가 있어 수업 반 연동을 해제할 수 없습니다. 먼저 배정을 변경해주세요.", "error");
+        return;
+      }
+      updateTeachers(teachers.filter(x => x.id !== teacherId));
+      teacherId = null;
     }
+
+    // 2) 로그인 계정 정보 동기화
+    if (editing?.accountId) {
+      updateAccounts(accounts.map(a => a.id === editing.accountId ? { ...a, name, classOrTitle, role: form.role, linkedTeacherName: form.hasClass ? name : null, updatedAt: new Date().toISOString() } : a));
+      if (session?.id === editing.accountId) { setSession(s => ({ ...s, name, classOrTitle, role: form.role, linkedTeacherName: form.hasClass ? name : null })); setRole(form.role); setTeacherName(form.hasClass ? name : name); }
+    } else {
+      const passwordHash = await hashPassword("1234", username);
+      const newAcc = { id: uid(), name, username, classOrTitle, role: form.role, linkedTeacherName: form.hasClass ? name : null, isSuperAdmin: false, passwordHash, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), lastLogin: null };
+      updateAccounts([...accounts, newAcc]);
+    }
+    notify(editing ? "교사 정보를 수정했습니다." : "교사를 등록했습니다. 초기 비밀번호는 1234입니다.");
   };
-  const deleteTeacher = (id) => {
-    const t = teachers.find(x => x.id === id);
+
+  const deleteTeacherAccount = (row) => {
+    const t = row.teacher, a = row.account;
     if (t && (children.some(c => c.teacher === t.name) || schedule.some(s => s.teacher === t.name))) {
       notify("이 교사가 배정된 아이 또는 교시가 있어 삭제할 수 없습니다. 먼저 배정을 변경해주세요.", "error");
       return;
     }
-    updateTeachers(teachers.filter(x => x.id !== id));
+    if (a?.isSuperAdmin) { notify("최고 관리자 계정은 삭제할 수 없습니다.", "error"); return; }
+    if (t) updateTeachers(teachers.filter(x => x.id !== t.id));
+    if (a) updateAccounts(accounts.filter(x => x.id !== a.id));
   };
 
   const syncChildSlots = (childId, slotIds) => {
@@ -4099,7 +4101,7 @@ function App() {
             <ChildrenList children={children} schedule={schedule} teachers={teachers} briefings={briefings} deepBriefings={deepBriefings} role={role} teacherName={teacherName} setView={setView} setSelectedChildId={setSelectedChildId} onAddChild={addChild} />
           )}
           {view === "teachers" && (
-            <TeacherManager teachers={teachers} children={children} schedule={schedule} onAdd={addTeacher} onEdit={editTeacher} onDelete={deleteTeacher} />
+            <TeacherManager teachers={teachers} accounts={accounts} children={children} schedule={schedule} onSave={saveTeacherAccount} onDelete={deleteTeacherAccount} onResetPassword={resetAccountPassword} />
           )}
           {view === "withdrawn" && (
             <WithdrawnList children={children} briefings={briefings} setView={setView} setSelectedChildId={setSelectedChildId} onReinstate={reinstateChild} onHardDelete={hardDeleteChild} />
@@ -4135,9 +4137,6 @@ function App() {
             />
           )}
           {view === "references" && <ReferencesPage references={references} onAdd={addReference} onDelete={deleteReference} />}
-          {view === "accounts" && role === "admin" && (
-            <AccountManager accounts={accounts} teachers={teachers} onCreate={addAccount} onUpdate={editAccount} onResetPassword={resetAccountPassword} />
-          )}
           </div>
         </div>
       </div>
