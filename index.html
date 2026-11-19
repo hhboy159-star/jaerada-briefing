@@ -975,6 +975,65 @@ async function regenerateKeywordItem(child, batch, keyword, currentKeywords, ins
   return stripMetaPhrases(text.replace(/```/g, "").trim());
 }
 
+/* ---------------------------------------------------------
+   일일 수업기록 → 학부모용 통합 문단 생성
+   (ABC 구조는 교사/원장용 내부 기록으로 그대로 유지하고, 학부모가 보는
+   "자비스"에는 이 통합 문단만 복사해서 올리는 것을 목표로 한다.)
+--------------------------------------------------------- */
+function buildDailyParentSummarySystemPrompt(child) {
+  const givenName = childGivenName(child?.name);
+  return [
+    "너는 미술학원 담당 선생님을 대신해, 하루치 수업기록 하나를 학부모에게 보여줄 하나의 자연스러운 글로 정리하는 보조자다.",
+    `아이를 부를 때는 '${child?.name}' 대신 이름 부분인 '${givenName}'만 자연스럽게 사용한다. 받침이 있는 이름은 반드시 '이'를 붙인 뒤 조사를 쓴다 (예: '${withTopicParticle(givenName)}', '${withSubjectParticle(givenName)}', '${withObjectParticle(givenName)}'). '학생'을 붙이지 않는다.`,
+    "\n[핵심 지시]",
+    "전달되는 '수업 주제', '교사 종합 브리핑', '선행사건', '행동', '결과' 다섯 항목의 내용을 분석해서, 그 항목 구분이나 '선행사건', '행동', '결과' 같은 용어를 절대 노출하지 않고, 하나로 자연스럽게 이어지는 글(한 문단, 3~5문장, 150~300자 내외)로 재구성한다.",
+    "어떤 상황에서 아이가 어떻게 행동했고 어떤 결과나 변화가 있었는지를 있는 그대로, 전문 용어 없이, 선생님이 학부모에게 말로 설명하듯 전달한다.",
+    "기록에 없는 내용을 지어내지 않는다. 아이의 행동을 부정적으로 단정하거나 문제 행동을 과장하지 않되, 사실을 왜곡하지도 않는다 - 있었던 일을 담백하고 따뜻하게 전달한다.",
+    "\n[문장은 반드시 교사의 실제 관찰 기록을 중심으로, 학부모가 바로 이해할 수 있는 쉬운 말로 쓴다 - 가장 중요한 문체 원칙이다]",
+    "- 평가 보고서가 아니라 선생님이 학부모에게 직접 설명하듯 전달하는 글이다. '자기주도성', '독립적인 사고 발달', '자율성', '인지적 성장' 같은 학술적·평가적 용어나 추상적인 개념어는 쓰지 않는다. 교실에서 실제로 있었던 구체적인 행동과 장면으로 설명한다.",
+    "- 예) 금지: \"자신의 의견과 선택을 존중받고 싶어하는 지호의 독립적인 사고 발달을 보여줍니다.\" / 권장: \"지호는 자신이 만들고 싶은 것을 직접 정하고, 스스로 작업을 이어가는 모습을 보였습니다.\"",
+    "- 아이의 심리나 속마음, 의도를 기록에 없이 짐작해서 쓰지 않는다. 기록에 실제로 나타난 말과 행동, 결과물만으로 설명한다.",
+    "\n문체 규칙: 학부모 상담용 존댓말로 선생님이 직접 설명하듯 따뜻하고 쉬운 서술형, 실제 기록 근거, 추측·진단·전문용어·학술적 표현·과도한 칭찬 금지.",
+    `대비형 표현을 반복 사용하지 않는다: ${FORBIDDEN_LIST.join(", ")}.`,
+    "'스스로'라는 단어를 이 글 안에서 두 번 이상 쓰지 않는다 - 필요하면 '직접', '본인이', '자기 힘으로' 등으로 바꿔 쓴다.",
+    "'이는'으로 시작하는 문장을 절대 쓰지 않는다 - '~했습니다. 이는 ~을 보여줍니다/판단됩니다/의미합니다' 식의 두 문장 구조를 쓰지 않고, 행동 묘사와 의미를 한 문장으로 합쳐 쓴다. '~하고 있음을 알 수 있습니다' 같은 재진술형 종결도 쓰지 않는다.",
+    "문장 길이를 짧게/길게 섞어 리듬을 주고, 꼭 아이 이름으로 문장을 시작할 필요는 없다 (단, 이름 대신 '그는/그녀는/그 아이는' 같은 3인칭 대명사를 쓰지 않는다 - 주어를 생략하거나 장면 묘사로 자연스럽게 이어 쓴다). 기본은 정중체(~했습니다)이되, 생생한 장면이나 아이의 말을 전할 땐 한 문장 정도 편안한 말투(~했어요)를 섞어도 된다(문단 전체를 해요체로 쓰지는 않는다).",
+    "'AI 테스트 모드', 'AI가 생성', '자동 생성', '실제 생성 시', '선택한 수업기록을 기반으로 생성', '테스트용 문장', '프롬프트' 등 개발·시스템 관련 표현은 본문에 절대 포함하지 않는다. 학부모에게 전달할 내용만 작성한다.",
+    "JSON이 아닌 완성된 문단 텍스트만 출력한다. 다른 설명이나 코드펜스, 줄바꿈 제목 등을 포함하지 않는다.",
+  ].join("\n");
+}
+
+function buildDailyParentSummaryUserPrompt(child, record) {
+  return [
+    `아이: ${child?.name} (${child?.age}세 · ${child?.grade || ""})`,
+    "\n아래는 하루치 수업기록 하나다. 이 내용을 바탕으로 학부모가 읽을 하나의 글만 작성하라.",
+    `수업 주제: ${record?.topic || ""}`,
+    `교사 종합 브리핑: ${record?.teacherSummary || ""}`,
+    `선행사건: ${record?.antecedent || ""}`,
+    `행동: ${record?.behavior || ""}`,
+    `결과: ${record?.consequence || ""}`,
+  ].join("\n");
+}
+
+// 학부모용 통합 문단을 실제 AI로 생성한다.
+async function generateDailyParentSummary(child, record) {
+  const text = await callAIModel(buildDailyParentSummarySystemPrompt(child), buildDailyParentSummaryUserPrompt(child, record));
+  return stripMetaPhrases(text.replace(/```/g, "").trim());
+}
+
+// AI 테스트 모드용 미리보기 생성기 - 실제 AI를 부르지 않고도 결과를 미리 볼 수 있게 한다.
+function mockDailyParentSummary(child, record) {
+  const n = childGivenName(child?.name);
+  const nTopic = withTopicParticle(n);
+  const nSubject = withSubjectParticle(n);
+  const topic = (record?.topic || "").trim() || "이번 수업";
+  const summary = (record?.teacherSummary || "").trim();
+  const base = summary
+    ? `${nTopic} ${topic} 시간에 ${summary}`
+    : `${nTopic} ${topic} 시간을 보냈습니다.`;
+  return `${base} 그 과정에서 ${nSubject} 보인 모습을 선생님이 가까이에서 지켜봤고, 이후 수업 분위기도 편안하게 이어졌습니다. 다음 시간에도 이어서 함께 지켜보겠습니다. (테스트 모드 미리보기)`;
+}
+
 // AI 테스트 모드용 미리보기 생성기 (키워드 방식) - 실제 AI를 부르지 않고도 새 형식의 결과를 미리 볼 수 있게 한다.
 // 2026-11: 학술적·평가적 표현("상호작용 방식", "완성도" 등의 추상어) 대신, 실제 교실 장면을 그대로
 // 설명하는 쉬운 말투로 미리보기 문장을 작성해 실제 생성 결과의 톤을 미리 보여준다.
@@ -2298,10 +2357,11 @@ function ChangePasswordModal({ account, onClose, onChange, notify }) {
 /* ---------------------------------------------------------
    기존 모달형 일일 브리핑 작성 (아이 상세 페이지용, 자유 입력)
 --------------------------------------------------------- */
-function DailyBriefingForm({ child, editing, onCancel, onSave }) {
+function DailyBriefingForm({ child, editing, onCancel, onSave, testMode, notify }) {
   const draftKey = `draft:${child.id}:${editing ? editing.id : "adhoc"}`;
   const [form, setForm] = useState(editing || { date: todayISO(), topic: "", teacherSummary: "", antecedent: "", behavior: "", consequence: "" });
   const [savedNote, setSavedNote] = useState("");
+  const [busy, setBusy] = useState(false);
   const timer = useRef(null);
 
   useEffect(() => {
@@ -2315,7 +2375,23 @@ function DailyBriefingForm({ child, editing, onCancel, onSave }) {
     const next = { ...form, [k]: v }; setForm(next); clearTimeout(timer.current);
     timer.current = setTimeout(async () => { await saveKey(draftKey, next, false); setSavedNote("자동 임시저장됨 · " + new Date().toLocaleTimeString("ko-KR")); }, 900);
   };
-  const submit = async () => { await deleteKey(draftKey, false); onSave({ ...form, week: weekLabel(form.date), status: "completed" }); };
+  const submit = async () => {
+    if (!form.topic) { notify?.("수업 주제를 입력해주세요.", "error"); return; }
+    setBusy(true);
+    let parentSummary = editing?.parentSummary || "";
+    let parentSummaryUpdatedAt = editing?.parentSummaryUpdatedAt || null;
+    try {
+      const record = { ...form };
+      parentSummary = testMode ? mockDailyParentSummary(child, record) : await generateDailyParentSummary(child, record);
+      parentSummaryUpdatedAt = new Date().toISOString();
+    } catch (e) {
+      console.error("학부모용 글 생성 실패:", e);
+      notify?.(`학부모용 글 생성에 실패했습니다. 수업기록은 저장되며, 아래에서 나중에 다시 생성할 수 있습니다: ${e?.message || e}`, "error");
+    }
+    await deleteKey(draftKey, false);
+    onSave({ ...form, week: weekLabel(form.date), status: "completed", parentSummary, parentSummaryUpdatedAt });
+    setBusy(false);
+  };
 
   return (
     <div className="fixed inset-0 bg-slate-900/40 flex items-center justify-center z-40 p-4">
@@ -2344,7 +2420,9 @@ function DailyBriefingForm({ child, editing, onCancel, onSave }) {
           <span className="text-[11px] text-slate-400 flex items-center gap-1">{savedNote && <><Save className="w-3 h-3" />{savedNote}</>}</span>
           <div className="flex gap-2">
             <button onClick={onCancel} className="px-4 py-2 text-sm rounded-lg text-slate-500 hover:bg-slate-50">취소</button>
-            <button onClick={submit} disabled={!form.topic} className="px-4 py-2 text-sm rounded-lg bg-blue-900 text-white font-medium hover:bg-blue-800 disabled:opacity-40">저장</button>
+            <button onClick={submit} disabled={!form.topic || busy} className="flex items-center gap-1.5 px-4 py-2 text-sm rounded-lg bg-blue-900 text-white font-medium hover:bg-blue-800 disabled:opacity-40">
+              {busy ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> 학부모용 글 생성 중...</> : "저장"}
+            </button>
           </div>
         </div>
       </div>
@@ -2355,11 +2433,13 @@ function DailyBriefingForm({ child, editing, onCancel, onSave }) {
 /* ---------------------------------------------------------
    아이 상세 페이지
 --------------------------------------------------------- */
-function ChildDetail({ child, schedule, teachers, briefings, deepBriefings, role, generating, onUpdateChild, onWithdrawChild, onReinstateChild, onAddBriefing, onUpdateBriefing, onDeleteBriefing, onGenerateDeep, onEnsureSlot, setView, setSelectedDeepId }) {
+function ChildDetail({ child, schedule, teachers, briefings, deepBriefings, role, generating, onUpdateChild, onWithdrawChild, onReinstateChild, onAddBriefing, onUpdateBriefing, onDeleteBriefing, onGenerateDeep, onEnsureSlot, setView, setSelectedDeepId, testMode, notify }) {
   const [tab, setTab] = useState("timeline");
   const [showForm, setShowForm] = useState(false);
   const [editingBriefing, setEditingBriefing] = useState(null);
   const [editingInfo, setEditingInfo] = useState(false);
+  // 일일 브리핑 카드에서 학부모용 글을 재생성/생성할 때, 그 기록의 id를 담아 해당 버튼만 로딩 표시한다.
+  const [regenParentId, setRegenParentId] = useState(null);
   const isWithdrawn = child.status === "withdrawn";
   // 타임라인 페이지네이션 (10건 단위) - 이 상태는 "타임라인 보기" 자체에 속하므로
   // 페이지만 넘길 때는 아이 선택/탭 등 다른 화면 상태에 영향을 주지 않습니다.
@@ -2388,6 +2468,23 @@ function ChildDetail({ child, schedule, teachers, briefings, deepBriefings, role
   const timelineTotalPages = Math.max(1, Math.ceil(timeline.length / TIMELINE_PAGE_SIZE));
   const timelinePageSafe = Math.min(timelinePage, timelineTotalPages);
   const timelinePaged = timeline.slice((timelinePageSafe - 1) * TIMELINE_PAGE_SIZE, timelinePageSafe * TIMELINE_PAGE_SIZE);
+
+  // 일일 브리핑 기록 하나의 학부모용 글을 (재)생성한다.
+  const regenerateParentSummary = async (b) => {
+    setRegenParentId(b.id);
+    try {
+      const parentSummary = testMode ? mockDailyParentSummary(child, b) : await generateDailyParentSummary(child, b);
+      onUpdateBriefing({ ...b, parentSummary, parentSummaryUpdatedAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+    } catch (e) {
+      console.error("학부모용 글 생성 실패:", e);
+      notify?.("학부모용 글 생성에 실패했습니다. 잠시 후 다시 시도해주세요.", "error");
+    }
+    setRegenParentId(null);
+  };
+  const copyParentSummary = async (text) => {
+    try { await navigator.clipboard.writeText(text); notify?.("학부모용 글을 클립보드에 복사했습니다."); }
+    catch { notify?.("복사에 실패했습니다.", "error"); }
+  };
 
   return (
     <div className="space-y-5">
@@ -2504,6 +2601,29 @@ function ChildDetail({ child, schedule, teachers, briefings, deepBriefings, role
                   <button onClick={() => { if (confirm("이 기록을 삭제할까요?")) onDeleteBriefing(b.id); }} className="p-1.5 rounded-md hover:bg-red-50 text-red-400"><Trash2 className="w-3.5 h-3.5" /></button>
                 </div>
               </div>
+              <div className="bg-blue-50 border border-blue-100 rounded-lg p-3 mb-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[11px] font-medium text-blue-900">학부모용 글</span>
+                  {b.parentSummary && (
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button onClick={() => copyParentSummary(b.parentSummary)} className="flex items-center gap-1 text-[11px] text-blue-700 hover:underline"><Copy className="w-3 h-3" /> 복사</button>
+                      <button onClick={() => regenerateParentSummary(b)} disabled={regenParentId === b.id} className="flex items-center gap-1 text-[11px] text-blue-700 hover:underline disabled:opacity-40">
+                        {regenParentId === b.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />} 다시 생성
+                      </button>
+                    </div>
+                  )}
+                </div>
+                {b.parentSummary ? (
+                  <p className="text-xs text-slate-700 mt-1.5 leading-relaxed">{b.parentSummary}</p>
+                ) : (
+                  <div className="flex items-center justify-between gap-2 mt-1">
+                    <span className="text-xs text-slate-400">아직 학부모용 글이 없습니다</span>
+                    <button onClick={() => regenerateParentSummary(b)} disabled={regenParentId === b.id} className="flex items-center gap-1 text-[11px] text-blue-700 hover:underline disabled:opacity-40 shrink-0">
+                      {regenParentId === b.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />} 생성하기
+                    </button>
+                  </div>
+                )}
+              </div>
               <div className="grid sm:grid-cols-2 gap-2 text-xs text-slate-600">
                 <div className="sm:col-span-2"><span className="font-medium text-slate-400">종합 </span>{b.teacherSummary}</div>
                 <div><span className="font-medium text-slate-400">선행사건 </span>{b.antecedent}</div>
@@ -2531,7 +2651,7 @@ function ChildDetail({ child, schedule, teachers, briefings, deepBriefings, role
       )}
 
       {showForm && (
-        <DailyBriefingForm child={child} editing={editingBriefing} onCancel={() => setShowForm(false)}
+        <DailyBriefingForm child={child} editing={editingBriefing} onCancel={() => setShowForm(false)} testMode={testMode} notify={notify}
           onSave={(data) => { if (editingBriefing) onUpdateBriefing({ ...editingBriefing, ...data }); else onAddBriefing({ id: uid(), childId: child.id, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), ...data }); setShowForm(false); }} />
       )}
       {editingInfo && (
@@ -3349,6 +3469,10 @@ function DailyBriefingPanel({ child, slot, date, setDate, briefings, references,
   const [focusedViewMode, setFocusedViewMode] = useState("edit"); // 'edit' | 'document'
   // 2026-11: 집중브리핑 생성 시 이 아이의 이전 집중브리핑(최근 3건)을 함께 참고할지 여부. 기본 ON.
   const [referPrior, setReferPrior] = useState(true);
+  // "작성 완료 처리" 시 학부모용 글을 함께 생성하는 동안의 로딩 상태
+  const [completing, setCompleting] = useState(false);
+  // 타임라인에서 특정 일일 기록의 학부모용 글을 재생성/생성할 때, 그 기록의 id를 담아 해당 버튼만 로딩 표시한다.
+  const [regenParentId, setRegenParentId] = useState(null);
   const focusedDocRef = useRef(null);
   const timer = useRef(null);
 
@@ -3383,13 +3507,26 @@ function DailyBriefingPanel({ child, slot, date, setDate, briefings, references,
 
   const complete = async () => {
     if (!form.topic) { notify("수업 주제를 입력해주세요.", "error"); return; }
+    setCompleting(true);
+    let parentSummary = existing?.parentSummary || "";
+    let parentSummaryUpdatedAt = existing?.parentSummaryUpdatedAt || null;
+    try {
+      const record = { ...form };
+      parentSummary = testMode ? mockDailyParentSummary(child, record) : await generateDailyParentSummary(child, record);
+      parentSummaryUpdatedAt = new Date().toISOString();
+    } catch (e) {
+      console.error("학부모용 글 생성 실패:", e);
+      notify(`학부모용 글 생성에 실패했습니다. 수업기록은 저장되며, 아래에서 나중에 다시 생성할 수 있습니다: ${e?.message || e}`, "error");
+    }
     await deleteKey(draftKey, false);
     await onSaveDraft(child.id, date, false);
     onSubmit({
       id: existing ? existing.id : uid(), childId: child.id, date, day: slot.day, slotId: slot.id, slotLabel: `${slot.day} ${slot.name}`,
       week: weekLabel(date), status: "completed", isMakeup, ...form,
+      parentSummary, parentSummaryUpdatedAt,
       createdAt: existing ? existing.createdAt : new Date().toISOString(), updatedAt: new Date().toISOString(),
     });
+    setCompleting(false);
     notify(isMakeup ? "보충수업 기록이 작성 완료 처리되었습니다." : "작성 완료 처리되었습니다.");
   };
 
@@ -3431,6 +3568,24 @@ function DailyBriefingPanel({ child, slot, date, setDate, briefings, references,
     const last = pastList[pastList.length - 1];
     setForm({ topic: last.topic, teacherSummary: last.teacherSummary, antecedent: last.antecedent, behavior: last.behavior, consequence: last.consequence });
     notify("최근 기록을 불러왔습니다. 필요한 부분을 수정해주세요.");
+  };
+
+  // 타임라인에 있는 특정 일일 기록 하나의 학부모용 글을 (재)생성한다.
+  const regenerateDailyParentSummary = async (b) => {
+    setRegenParentId(b.id);
+    try {
+      const parentSummary = testMode ? mockDailyParentSummary(child, b) : await generateDailyParentSummary(child, b);
+      onSubmit({ ...b, parentSummary, parentSummaryUpdatedAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+    } catch (e) {
+      console.error("학부모용 글 생성 실패:", e);
+      notify("학부모용 글 생성에 실패했습니다. 잠시 후 다시 시도해주세요.", "error");
+    }
+    setRegenParentId(null);
+  };
+
+  const copyParentSummary = async (text) => {
+    try { await navigator.clipboard.writeText(text); notify("학부모용 글을 클립보드에 복사했습니다."); }
+    catch { notify("복사에 실패했습니다.", "error"); }
   };
 
   const idx = slot.childIds.indexOf(child.id);
@@ -3635,7 +3790,9 @@ function DailyBriefingPanel({ child, slot, date, setDate, briefings, references,
             <button onClick={openPicker} className="flex items-center gap-1 text-xs text-amber-700 border border-amber-200 bg-amber-50 rounded-lg px-3 py-1.5 hover:bg-amber-100"><Sparkles className="w-3.5 h-3.5" /> 집중브리핑 작성하기</button>
             <button onClick={() => { if (confirm(`${child.name} 학생을 오늘(${date}) 결석 처리할까요?`)) onMarkAbsent(child.id, date, slot); }} className="flex items-center gap-1 text-xs text-slate-500 border border-slate-200 rounded-lg px-3 py-1.5 hover:bg-slate-50"><UserX className="w-3.5 h-3.5" /> 결석 처리</button>
             <button onClick={saveManual} className="flex items-center gap-1 text-xs text-slate-600 border border-slate-200 rounded-lg px-3 py-1.5 hover:bg-slate-50"><Save className="w-3.5 h-3.5" /> 임시 저장</button>
-            <button onClick={complete} className="flex items-center gap-1.5 bg-blue-900 text-white text-xs font-medium px-4 py-1.5 rounded-lg hover:bg-blue-800"><CheckCircle2 className="w-3.5 h-3.5" /> 작성 완료 처리</button>
+            <button onClick={complete} disabled={completing} className="flex items-center gap-1.5 bg-blue-900 text-white text-xs font-medium px-4 py-1.5 rounded-lg hover:bg-blue-800 disabled:opacity-50">
+              {completing ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> 학부모용 글 생성 중...</> : <><CheckCircle2 className="w-3.5 h-3.5" /> 작성 완료 처리</>}
+            </button>
           </div>
         </div>
       </div>
@@ -3670,6 +3827,29 @@ function DailyBriefingPanel({ child, slot, date, setDate, briefings, references,
                 </button>
                 {open && (
                   <div className="px-3 pb-3 text-xs text-slate-600 space-y-1.5 border-t border-slate-50 pt-2">
+                    <div className="bg-blue-50 border border-blue-100 rounded-lg p-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[11px] font-medium text-blue-900">학부모님께 전달될 글</span>
+                        {b.parentSummary && (
+                          <div className="flex items-center gap-2 shrink-0">
+                            <button onClick={() => copyParentSummary(b.parentSummary)} className="flex items-center gap-1 text-[11px] text-blue-700 hover:underline"><Copy className="w-3 h-3" /> 복사</button>
+                            <button onClick={() => regenerateDailyParentSummary(b)} disabled={regenParentId === b.id} className="flex items-center gap-1 text-[11px] text-blue-700 hover:underline disabled:opacity-40">
+                              {regenParentId === b.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />} 다시 생성
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                      {b.parentSummary ? (
+                        <p className="text-xs text-slate-700 mt-1.5 leading-relaxed">{b.parentSummary}</p>
+                      ) : (
+                        <div className="flex items-center justify-between gap-2 mt-1">
+                          <span className="text-xs text-slate-400">아직 학부모용 글이 없습니다</span>
+                          <button onClick={() => regenerateDailyParentSummary(b)} disabled={regenParentId === b.id} className="flex items-center gap-1 text-[11px] text-blue-700 hover:underline disabled:opacity-40 shrink-0">
+                            {regenParentId === b.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />} 생성하기
+                          </button>
+                        </div>
+                      )}
+                    </div>
                     <div><span className="text-slate-400">교사 종합 브리핑 </span>{b.teacherSummary}</div>
                     <div><span className="text-slate-400">선행사건 </span>{b.antecedent}</div>
                     <div><span className="text-slate-400">행동 </span>{b.behavior}</div>
@@ -4665,6 +4845,7 @@ function App() {
               onUpdateChild={editChild} onWithdrawChild={withdrawChild} onReinstateChild={reinstateChild}
               onAddBriefing={addBriefing} onUpdateBriefing={editBriefing} onDeleteBriefing={deleteBriefing}
               onGenerateDeep={handleGenerateDeep} onEnsureSlot={ensureScheduleSlot} setView={setView} setSelectedDeepId={setSelectedDeepId}
+              testMode={testMode} notify={notify}
             />
           )}
           {view === "deepList" && (
